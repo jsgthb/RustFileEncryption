@@ -1,17 +1,20 @@
-use std::fs;
+use std::{fs, collections::HashMap};
 use inquire::{InquireError, Select, Password};
 
 pub fn get_file_path() -> String {
-    let mut files: Vec<String> = Vec::new();
+    let path = "./files/";
+    // Vector to store display options for select
     let mut file_selection_options: Vec<String> = Vec::new();
-    let directory = fs::read_dir("./files").expect("Could not read directory");
+    // Hashmap to lookup path of selected file from vector
+    let mut files = HashMap::new();
     // Loop through files in file directory
+    let directory = fs::read_dir(path).expect("Could not read directory");
     for file in directory {
         // Store file data
         let file_name = file.as_ref().expect("Could not read file").file_name().into_string().expect("Could not parse file");
         let file_length = file.expect("Could not read file").metadata().expect("Could not parse file").len();
         let file_selection = format!("{} ({})", file_name, pretty_print_filesize(file_length));
-        files.push(file_name); 
+        files.insert(file_selection.clone(), path.to_string() + &file_name); 
         file_selection_options.push(file_selection);
     }
     // Exit if no files are found
@@ -21,7 +24,7 @@ pub fn get_file_path() -> String {
     // Select which file to encrypt or decrypt
     let file_selection: Result<String, InquireError> = Select::new("Select file:", file_selection_options).prompt();
     match file_selection {
-        Ok(choice) => return choice.to_string(),
+        Ok(choice) => return files.get(&choice).expect("Hashmap error").to_string(),
         Err(_) => panic!("Selection error")
     }
 }
