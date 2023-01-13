@@ -1,6 +1,5 @@
 use std::fs;
-use dialoguer::{Select, Password};
-use dialoguer::theme::ColorfulTheme;
+use inquire::{InquireError, Select, Password};
 
 pub fn get_file_path() -> String {
     let mut files: Vec<String> = Vec::new();
@@ -20,31 +19,28 @@ pub fn get_file_path() -> String {
         panic!("No files found")
     }
     // Select which file to encrypt or decrypt
-    let file_selection =  Select::with_theme(&ColorfulTheme::default())
-                .with_prompt("Select file")
-                .default(0)
-                .items(&file_selection_options[..])
-                .interact()
-                .expect("Dialoguer selection error"); 
-    return files[file_selection].clone();
+    let file_selection: Result<String, InquireError> = Select::new("Select file:", file_selection_options).prompt();
+    match file_selection {
+        Ok(choice) => return choice.to_string(),
+        Err(_) => panic!("Selection error")
+    }
 }
 
 pub fn select_method() -> String {
-    let method_selection_options: Vec<String> = vec!("Encrypt".to_string(), "Decrypt".to_string());
-    let method_selection =  Select::with_theme(&ColorfulTheme::default())
-                .with_prompt("Encrypt or decrypt?")
-                .default(0)
-                .items(&method_selection_options[..])
-                .interact()
-                .expect("Dialoguer selection error");
-    return method_selection_options[method_selection].clone();
+    let method_selection_options: Vec<&str> = vec!("Encrypt", "Decrypt");
+    let method_selection: Result<&str, InquireError> = Select::new("Select method:", method_selection_options).prompt();
+    match method_selection {
+        Ok(choice) => return choice.to_string(),
+        Err(_) => panic!("Selection error")
+    }
 }
 
 pub fn enter_password() -> String {
-    return Password::with_theme(&ColorfulTheme::default())
-        .with_prompt("Enter password")
-        .interact()
-        .expect("Dialoguer selection error");
+    let password = Password::new("Password:").without_confirmation().prompt();
+    match password {
+        Ok(pass) => return pass,
+        Err(_) => panic!("Password error"),
+    }
 }
 
 fn pretty_print_filesize(byte_length: u64) -> String {
