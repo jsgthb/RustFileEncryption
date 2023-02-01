@@ -54,8 +54,14 @@ pub fn encrypt_file(file_path: String, password: String) -> () {
     fs::write(format!("{}.encrypted", file_path), output).expect("Could not write file to disk");
 }
 
-pub fn decrypt_file() -> () {
-
+pub fn decrypt_file(file_path: String, password: String) -> () {
+    // Get encryption data from file
+    let input_file = fs::read(file_path).expect("Could not read file");
+    let (hashed_hash_bytes, input_file) = input_file.split_at(96);
+    let (password_iv_bytes, input_file) = input_file.split_at(12);
+    let (password_ciphertext, input_file) = input_file.split_at(48);
+    let (file_iv, file_ciphertext) = input_file.split_at(12);
+    let hashed_hash = String::from_utf8(hashed_hash_bytes.to_vec()).expect("Could not parse hash");
 }
 
 fn generate_encryption_key(exisiting_bytes: Option<&[u8]>) -> GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>> {
