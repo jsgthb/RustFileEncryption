@@ -2,7 +2,7 @@ use std::fs;
 use aes_gcm::aead::consts::{B1, B0};
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::generic_array::typenum::{UInt, UTerm};
-use argon2::{Argon2, PasswordHasher, PasswordHash};
+use argon2::{Argon2, PasswordHasher, PasswordHash, PasswordVerifier};
 use argon2::password_hash::SaltString;
 use rand::rngs::OsRng;
 use rand::RngCore; 
@@ -62,6 +62,11 @@ pub fn decrypt_file(file_path: String, password: String) -> () {
     let (password_ciphertext, input_file) = input_file.split_at(48);
     let (file_iv, file_ciphertext) = input_file.split_at(12);
     let hashed_hash = String::from_utf8(hashed_hash_bytes.to_vec()).expect("Could not parse hash");
+    if let Some(password_encryption_key) = verify_password(password, hashed_hash) {
+
+    } else {
+        println!("Decryption failure: Password is incorrect")
+    }
 }
 
 fn generate_encryption_key(exisiting_bytes: Option<&[u8]>) -> GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>> {
@@ -82,4 +87,18 @@ fn generate_nonce() -> GenericArray<u8, UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>
     OsRng.fill_bytes(&mut file_iv_bytes);
     return *Nonce::from_slice(&file_iv_bytes);
 }
- 
+
+fn verify_password(plaintext_password: String, hashed_hash: String) -> Option<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>> {
+    // Verify if password is correct and return encryption key if so (returns None if incorrect)
+    let verification_hash_parsed = PasswordHash::new(&hashed_hash).expect("Hash could not be parsed");
+    let verification_salt = verification_hash_parsed.salt.expect("Salt could not be output").to_string();
+    let hashed_password = hash_password(plaintext_password, Some(verification_salt));
+    let hashed_password_parsed = PasswordHash::new(&hashed_password).expect("Hash could not be parsed");
+    let password_hash = hashed_password_parsed.hash.expect("Hash could not be output").to_string();
+    let matches = Argon2::default().verify_password(password_hash.as_bytes(), &verification_hash_parsed).is_ok();
+    if matches {
+        return Some(generate_encryption_key(Some(password_hash.as_bytes())));
+    } else {
+        return None;
+    }
+}
