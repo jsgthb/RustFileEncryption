@@ -1,13 +1,9 @@
 use std::fs;
-use aes_gcm::aead::consts::{B1, B0};
-use aes_gcm::aead::generic_array::GenericArray;
-use aes_gcm::aead::generic_array::typenum::{UInt, UTerm};
-use argon2::{Argon2, PasswordHasher, PasswordHash};
+use argon2::{Argon2, PasswordHasher, PasswordHash, PasswordVerifier};
 use argon2::password_hash::SaltString;
 use rand::rngs::OsRng;
-use rand::RngCore; 
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::{Aead, NewAead};
+use aes_gcm::{Aes256Gcm, KeyInit, AeadCore, Nonce};
+use aes_gcm::aead::Aead;
 
 fn hash_password(plaintext_password: String, existing_salt: Option<String>) -> String {
     // Generate salt if none was passed
@@ -26,16 +22,15 @@ pub fn encrypt_file(file_path: String, password: String) -> () {
     // Open selected file
     let input_file = std::fs::read(&file_path).unwrap();
     // Generate random 256 bit encryption key
-    let file_key = generate_encryption_key(None);
+    let file_key = Aes256Gcm::generate_key(&mut OsRng);
     // Generate random 96 bit iv
-    let file_iv = generate_nonce();
+    let file_iv = Aes256Gcm::generate_nonce(&mut OsRng);
     // Encrypt data with generated key
     let file_cipher = Aes256Gcm::new(&file_key);
     let file_ciphertext = file_cipher.encrypt(&file_iv, input_file.as_ref()).expect("Encryption failure!");
     // Encrypt generated key with password hash
-    let password_key = generate_encryption_key(Some(hash.as_bytes()));
-    let password_iv = generate_nonce();
-    let password_cipher = Aes256Gcm::new(&password_key);
+    let password_iv = Aes256Gcm::generate_nonce(&mut OsRng);
+    let password_cipher = Aes256Gcm::new_from_slice(hash.as_bytes()).expect("Could not generate AES key");
     let password_ciphertext = password_cipher.encrypt(&password_iv, file_key.to_vec().as_ref()).expect("Encryption failure!");
     // Hash hashed password again for storage
     let hashed_hash = hash_password(hash.to_string(), Some(salt.to_string()));
@@ -51,29 +46,41 @@ pub fn encrypt_file(file_path: String, password: String) -> () {
     output.extend(file_iv);
     // Rest of bytes for file ciphertext
     output.extend(&file_ciphertext);
-    fs::write(format!("{}.encrypted", file_path), output).expect("Could not write file to disk");
+    fs::write(file_path, output).expect("Could not write file to disk");
 }
 
-pub fn decrypt_file() -> () {
-
-}
-
-fn generate_encryption_key(exisiting_bytes: Option<&[u8]>) -> GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>> {
-    // Initialize 256 bit (32 byte) array
-    let mut key_bytes = [0u8; 32];
-    // Generate key from exisiting bytes or use random bytes
-    if let Some(bytes_to_copy) = exisiting_bytes {
-        key_bytes[..32].clone_from_slice(bytes_to_copy[..32].as_ref().into());
+pub fn decrypt_file(file_path: String, password: String) -> () {
+    // Get encryption data from file
+    let input_file = fs::read(&file_path).expect("Could not read file");
+    let (hashed_hash_bytes, input_file) = input_file.split_at(96);
+    let (password_iv_bytes, input_file) = input_file.split_at(12);
+    let (password_ciphertext, input_file) = input_file.split_at(48);
+    let (file_iv_bytes, file_ciphertext) = input_file.split_at(12);
+    let hashed_hash = String::from_utf8(hashed_hash_bytes.to_vec()).expect("Could not parse hash");
+    if let Some(password_encryption_key) = verify_password(password, hashed_hash) {
+        let password_cipher = Aes256Gcm::new_from_slice(&password_encryption_key).expect("Could not generate AES key");
+        let password_iv = Nonce::from_slice(password_iv_bytes);
+        let file_encryption_key = password_cipher.decrypt(password_iv, password_ciphertext).expect("Could not decrypt encryption key");
+        let file_cipher = Aes256Gcm::new_from_slice(&file_encryption_key).expect("Could not generate AES key");
+        let file_iv = Nonce::from_slice(file_iv_bytes);
+        let file_data = file_cipher.decrypt(file_iv, file_ciphertext).expect("Could not decrypt file data");
+        fs::write(file_path, file_data).expect("Could not write file to disk");
     } else {
-        OsRng.fill_bytes(&mut key_bytes);
+        println!("Decryption failure: Password is incorrect")
     }
-    return *Key::from_slice(&key_bytes); 
 }
 
-fn generate_nonce() -> GenericArray<u8, UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>> {
-    // Initialize 96 bit (12 byte) random array and generate + return nonce
-    let mut file_iv_bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut file_iv_bytes);
-    return *Nonce::from_slice(&file_iv_bytes);
+fn verify_password(plaintext_password: String, hashed_hash: String) -> Option<Vec<u8>> {
+    // Verify if password is correct and return encryption key if so (returns None if incorrect)
+    let verification_hash_parsed = PasswordHash::new(&hashed_hash).expect("Hash could not be parsed");
+    let verification_salt = verification_hash_parsed.salt.expect("Salt could not be output").to_string();
+    let hashed_password = hash_password(plaintext_password, Some(verification_salt));
+    let hashed_password_parsed = PasswordHash::new(&hashed_password).expect("Hash could not be parsed");
+    let password_hash = hashed_password_parsed.hash.expect("Hash could not be output");
+    let matches = Argon2::default().verify_password(password_hash.to_string().as_bytes(), &verification_hash_parsed).is_ok();
+    if matches {
+        return Some(password_hash.as_bytes().to_vec());
+    } else {
+        return None;
+    }
 }
- 
