@@ -11,6 +11,9 @@ fn main() {
             println!("Encrypting file...");
             aes_cryptography::encrypt_file(file_path, password);
         },
-        _=> println!("Decryption not implemented yet")
+        _=> {
+            println!("Decrypting file...");
+            aes_cryptography::decrypt_file(file_path, password);
+        }
     }
 }

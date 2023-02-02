@@ -2,7 +2,7 @@ use std::fs;
 use argon2::{Argon2, PasswordHasher, PasswordHash, PasswordVerifier};
 use argon2::password_hash::SaltString;
 use rand::rngs::OsRng;
-use aes_gcm::{Aes256Gcm, KeyInit, AeadCore};
+use aes_gcm::{Aes256Gcm, KeyInit, AeadCore, Nonce};
 use aes_gcm::aead::Aead;
 
 fn hash_password(plaintext_password: String, existing_salt: Option<String>) -> String {
@@ -46,19 +46,25 @@ pub fn encrypt_file(file_path: String, password: String) -> () {
     output.extend(file_iv);
     // Rest of bytes for file ciphertext
     output.extend(&file_ciphertext);
-    fs::write(format!("{}.encrypted", file_path), output).expect("Could not write file to disk");
+    fs::write(file_path, output).expect("Could not write file to disk");
 }
 
 pub fn decrypt_file(file_path: String, password: String) -> () {
     // Get encryption data from file
-    let input_file = fs::read(file_path).expect("Could not read file");
+    let input_file = fs::read(&file_path).expect("Could not read file");
     let (hashed_hash_bytes, input_file) = input_file.split_at(96);
     let (password_iv_bytes, input_file) = input_file.split_at(12);
     let (password_ciphertext, input_file) = input_file.split_at(48);
-    let (file_iv, file_ciphertext) = input_file.split_at(12);
+    let (file_iv_bytes, file_ciphertext) = input_file.split_at(12);
     let hashed_hash = String::from_utf8(hashed_hash_bytes.to_vec()).expect("Could not parse hash");
     if let Some(password_encryption_key) = verify_password(password, hashed_hash) {
-
+        let password_cipher = Aes256Gcm::new_from_slice(&password_encryption_key).expect("Could not generate AES key");
+        let password_iv = Nonce::from_slice(password_iv_bytes);
+        let file_encryption_key = password_cipher.decrypt(password_iv, password_ciphertext).expect("Could not decrypt encryption key");
+        let file_cipher = Aes256Gcm::new_from_slice(&file_encryption_key).expect("Could not generate AES key");
+        let file_iv = Nonce::from_slice(file_iv_bytes);
+        let file_data = file_cipher.decrypt(file_iv, file_ciphertext).expect("Could not decrypt file data");
+        fs::write(file_path, file_data).expect("Could not write file to disk");
     } else {
         println!("Decryption failure: Password is incorrect")
     }
@@ -70,8 +76,8 @@ fn verify_password(plaintext_password: String, hashed_hash: String) -> Option<Ve
     let verification_salt = verification_hash_parsed.salt.expect("Salt could not be output").to_string();
     let hashed_password = hash_password(plaintext_password, Some(verification_salt));
     let hashed_password_parsed = PasswordHash::new(&hashed_password).expect("Hash could not be parsed");
-    let password_hash = hashed_password_parsed.hash.expect("Hash could not be output").to_string();
-    let matches = Argon2::default().verify_password(password_hash.as_bytes(), &verification_hash_parsed).is_ok();
+    let password_hash = hashed_password_parsed.hash.expect("Hash could not be output");
+    let matches = Argon2::default().verify_password(password_hash.to_string().as_bytes(), &verification_hash_parsed).is_ok();
     if matches {
         return Some(password_hash.as_bytes().to_vec());
     } else {
